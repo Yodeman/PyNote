@@ -4,11 +4,12 @@ A python/tkinter text file editor and component.
 import os, sys
 from tkinter import *
 from tkinter import ttk
-from tkinter.filedialog import Open, SaveAs, asksaveasfilename
+from tkinter.filedialog import SaveAs, asksaveasfilename, askopenfilename
 from tkinter.messagebox import showerror, showinfo, askyesno
 from tkinter.simpledialog import askstring, askinteger
 from tkinter.colorchooser import askcolor
 from p_python.GUI.Tools.guimaker import *
+from p_python.GUI.Tools.windows import _window
 
 try:
     import textConfig
@@ -39,6 +40,9 @@ if sys.platform == 'win':
 class TextEditor:
     startfiledir = '.'
     editwindows = []
+    iconpatt = '*.ico'
+    iconmine = 'pad.ico'
+    helpButton = False
 
     # Unicode configurations
     # imported in class to allow overrides in subclass or self
@@ -101,7 +105,7 @@ class TextEditor:
                  ('Save As...               Ctrl+Shif+S', 5, self.onSaveAs),
                  'separator',
                  ('Page Setup...        ', 2, self.notDone),
-                 ('Print...                            Ctrl+P', 0, self.notDone),
+                 ('Print...                            Ctrl+P', 0, self.onPrint),
                  ('Exit', 0, self.onQuit)
                  ]),
             ('Edit', 0,
@@ -139,7 +143,7 @@ class TextEditor:
                 [('View Help', 0, self.notDone),
                  ('Send Feedback', 0, self.notDone),
                  'separator',
-                 ('About PyNote', 0, self.onAbout)
+                 ('About PyNote', 0, self.help)
                  ])
             ]
     def makeWidgets(self):
@@ -171,12 +175,18 @@ class TextEditor:
 
         self.text = text
 
+        self.text.bind('<Control-s>', self.onSave)
+        self.text.bind('<Control-p>', self.onPrint)
+        self.text.bind('<Control-f>', self.onFind)
+        self.text.bind('<Control-g>', self.onGoto)
+        self.text.bind('<Control-h>', self.onReplace)
+
     # File menu commands
-    def my_askopenfilename(self):
+    '''def my_askopenfilename(self):
         if not self.openDialog:
             self.openDialog = Open(initialdir=self.startfiledir,
                                     filetypes=self.ftypes)
-            return self.openDialog.show()
+            return self.openDialog.show()'''
     
     def my_asksaveasfilename(self):
         if not self.saveDialog:
@@ -188,20 +198,25 @@ class TextEditor:
         """
         Open file from system
         """
-        if self.text.edit_modified():
-            if not askyesno('PyNote', 'Save changes to file?'):
-                return
-            else:
-                self.onSave()
-                self.text.edit_modified(0)
-        
-        if not self.text.edit_modified():
-            file = loadFirst or self.my_askopenfilename()
+        def Open():
+            global file
+            file = loadFirst or askopenfilename(initialdir=self.startfiledir,
+                                    filetypes=self.ftypes)
             if not file:
                 return
             if not os.path.isfile(file):
                 showerror('PyNote', 'Could not open file'+file)
                 return
+
+        if self.text.edit_modified():
+            if not askyesno('PyNote', 'Save changes to file?'):
+                Open()
+            else:
+                self.onSave()
+                self.text.edit_modified(0)
+        
+        if not self.text.edit_modified():
+            Open()
         
         # try known encoding if passed and acurate
         text = None
@@ -259,7 +274,7 @@ class TextEditor:
             self.text.edit_reset()
             self.text.edit_modified(0)
 
-    def onSave(self):
+    def onSave(self, event):
         """
         save file to system
         """
@@ -423,8 +438,41 @@ class TextEditor:
     def onQuit(self):
         assert False, 'onQuit must be defined in window specific subclass'
 
-    #def text_edit_modified(self):
-        #return self.te
+    def onPrint(self, event):
+        import win32api, time
+        import win32print
+        import tempfile
+        from p_python.GUI.Tour.scrolledlist import ScrolledList
+        
+        printText = TextEditor.getAllText(self)
+        print(str(printText))
+
+        class Print(ScrolledList):
+            def __init__(self, options, parent=None):
+                Label(parent, text='Select Printer').pack(side=TOP, fill=BOTH, expand=YES)
+                ScrolledList.__init__(self, options, parent)
+                Button(parent, text='Print', command=(lambda:self.runCommand(self.selection()))).pack()
+                self.focus_get()
+                #self.grab_set()
+                self.wait_window()
+            def runCommand(self, selection):
+                filename = tempfile.mkstemp('.txt')[1]
+                print(filename)
+                open(filename, 'w').write(str(printText))
+                win32api.ShellExecute(
+                    0, 'printto', filename, '"%s"' % win32print.GetDefaultPrinter(),
+                    '.', 0
+                )
+                '''time.sleep(5)
+                os.remove(filename)'''
+
+        master = Toplevel()
+        master.title('Print')
+        master.config(height=40, width=70)
+        options = [i[2] for i in list(win32print.EnumPrinters(2))]
+        #print(options)
+
+        Print(options, master)
 
     # Edit menu commands
     def onUndo(self):
@@ -475,7 +523,7 @@ class TextEditor:
         self.text.mark_set(INSERT, '1.0')
         self.text.see(INSERT)
 
-    def onGoto(self, forceline=None):
+    def onGoto(self, event, forceline=None):
         """
         goes to a passes in line number
         """
@@ -494,7 +542,7 @@ class TextEditor:
             else:
                 showerror('PyNote', 'line number is beyond total numbers of lines')
 
-    def onFind(self, lastkey=None):
+    def onFind(self, event, lastkey=None):
         """
         Finds particular passed word in text
         """
@@ -512,7 +560,7 @@ class TextEditor:
                 #self.text.tag_remove(SEL, '1.0', END)       
                 self.text.see(where)
 
-    def onReplace(self):
+    def onReplace(self, event):
         """
         non-modal find/replace dialog
         """
@@ -567,8 +615,9 @@ class TextEditor:
         var1.set('courier')
         var2.set('12')
         var3.set('bold italic')
-        Button(popup, text='apply', command=
-                        lambda:self.onDoFont(var1.get(), var2.get(), var3.get()))
+        b = Button(popup, text='apply', command=
+                lambda:self.onDoFont(var1.get(), var2.get(), var3.get()))
+        b.pack()
         
     def onDoFont(self, family, size, style):
         try:
@@ -633,8 +682,8 @@ class TextEditor:
     def isModified(self):
         return self.text.edit_modified()
 
-    def onAbout(self):
-        showinfo('About PyNote', helptext)
+    def help(self):
+        showinfo('About sPyNote', helptext)
 
     def notDone(self):
         showerror('PyNote', 'Button not available')
@@ -644,7 +693,10 @@ class TextEditorMain(TextEditor, GuiMakerWindowMenu):
         GuiMaker.__init__(self, parent)
         TextEditor.__init__(self, loadFirst, loadEncode)
         self.title()
-        self.master.iconname('pad')
+        icon_name = _window.findIcon(self)
+        #print(icon_name)
+        self.master.iconname('PyNote')
+        self.master.iconbitmap(icon_name)
         self.master.protocol('WM_DELETE_WINDOW', self.onQuit)
         TextEditor.editwindows.append(self)
 
@@ -679,10 +731,22 @@ class TextEditorMainPopup(TextEditor, GuiMakerWindowMenu):
         GuiMaker.__init__(self, self.popup)
         TextEditor.__init__(self, loadFirst, loadEncode)
         assert self.master == self.popup
-        self.popup.title('PyNote')
-        self.popup.iconname('pad')
+        self.title()
+        icon_name = _window.findIcon(self)
+        #print(icon_name)
+        self.popup.iconname('PyNote')
+        self.popup.iconbitmap(icon_name)
         self.popup.protocol('WM_DELETE_WINDOW', self.onQuit)
         TextEditor.editwindows.append(self)
+
+    def title(self):
+        if type(self.currfile) == str:
+            name = os.path.basename(self.currfile).split('.')[0]
+        else:
+            name = self.currfile
+        self.Title = name or 'Untitled' 
+        self.popup.title(self.Title+' - PyNote')
+        self.after(1000, self.title)
 
     def onQuit(self):
         close = not self.text.edit_modified()
@@ -709,13 +773,13 @@ class TextEditorComponent(TextEditor, GuiMakerFrameMenu):
 
 # standalone program run
 
-def testPopup():
+'''def testPopup():
     root = Tk()
     TextEditorMainPopup(root)
     TextEditorMainPopup(root)
     Button(root, text='More', command=TextEditorMainPopup).pack(fill=X)
     Button(root, text='Quit', command=root.quit).pack(fill=X)
-    root.mainloop()
+    root.mainloop()'''
 
 def main():
     try:
